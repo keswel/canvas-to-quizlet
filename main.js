@@ -515,10 +515,40 @@ function main() {
 </div>
   
   `;
+
+  // jump to class="question"
+  // save div in array
+  //  
+  const questionDivs = parseQuizQuestions(html); 
+  console.log("Found: "+questionDivs.length+" Questions");
+
+  // needs to loop,
+  //  for each div 
+  //    save parsed question
   const parsedQuestions = parseQuizHTML(html);
   console.log(JSON.stringify(parsedQuestions, null, 2));
 
 }
+function parseQuizQuestions(html) { 
+  let questionsArr = [];
+  let divFormat = `
+<div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">
+  `;
+  
+  let currentIndex = 0;
+  const questionDiv = html.indexOf(divFormat, currentIndex);
+  if (questionDiv !== null) {
+    console.log(questionDiv+" found at "+questionDiv);
+    currentIndex++;
+  }
 
+
+  //questionsArr.push({
+  //  html: divData, 
+  //});
+  
+
+  return questionsArr;
+}
 main();
 export default main;
