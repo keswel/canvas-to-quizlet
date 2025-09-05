@@ -1,5 +1,64 @@
 import fs from "fs";
 
+function isDivClosed(s) { 
+    const stack = [];
+    const map = {
+        "<": ">",
+    };
+
+    for (let i = 0; i < s.length; i++) {
+        const char = s[i];
+
+        if (map[char]) { // If it's an opening bracket
+            stack.push(char);
+            console.log("opening");
+        } else { // If it's a closing bracket
+            console.log("closing");
+            if (stack.length === 0) {
+                return false; // Closing bracket with no opening
+            }
+            const lastOpen = stack.pop();
+            if (map[lastOpen] !== char) {
+                return false; // Mismatched brackets
+            }
+        }
+    }
+
+    return stack.length === 0; // True if stack is empty (all matched)
+}
+function parseQuizQuestions(html) { 
+  let questionsArr = [];
+  let questionCount = 0; 
+  
+  let htmlData = html.split("\n"); // split all the code 
+  let divFormat = `<div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">`;
+  
+  let openDiv = false;
+
+  for (let i=0; i<htmlData.length; i++) { 
+    if (htmlData[i] === divFormat) {
+      console.log("Q: "+i);
+      // TODO: read opening / closing div. 
+      //   needed to find each questions' content.
+      questionCount++;
+      while (!openDiv) {
+        
+      }
+      // save to buffer UNTIL <\div> 
+    }
+  }
+  if (questionCount = 0) {
+    return;
+  }
+
+
+  //questionsArr.push({
+  //  html: divData, 
+  //});
+  
+  return questionsArr;
+}
+
 function parseQuizHTML(htmlContent) {
     const questions = [];
     let currentIndex = 0;
@@ -527,28 +586,9 @@ function main() {
   //    save parsed question
   const parsedQuestions = parseQuizHTML(html);
   console.log(JSON.stringify(parsedQuestions, null, 2));
+  const val = "<<>>"
+  console.log("Testing: "+val+" : "+isDivClosed(val));
 
-}
-function parseQuizQuestions(html) { 
-  let questionsArr = [];
-  let divFormat = `
-<div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">
-  `;
-  
-  let currentIndex = 0;
-  const questionDiv = html.indexOf(divFormat, currentIndex);
-  if (questionDiv !== null) {
-    console.log(questionDiv+" found at "+questionDiv);
-    currentIndex++;
-  }
-
-
-  //questionsArr.push({
-  //  html: divData, 
-  //});
-  
-
-  return questionsArr;
 }
 main();
 export default main;
