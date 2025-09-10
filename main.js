@@ -1,62 +1,29 @@
-import fs from "fs";
-
-function isDivClosed(s) { 
+function isHtmlBalanced(html) {
     const stack = [];
-    const map = {
-        "<": ">",
-    };
+    const tagPattern = /<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g;
+    let match;
 
-    for (let i = 0; i < s.length; i++) {
-        const char = s[i];
-
-        if (map[char]) { // If it's an opening bracket
-            stack.push(char);
-            console.log("opening");
-        } else { // If it's a closing bracket
-            console.log("closing");
-            if (stack.length === 0) {
-                return false; // Closing bracket with no opening
+    while ((match = tagPattern.exec(html)) !== null) {
+        const fullTag = match[0];
+        const tagName = match[1].toLowerCase();
+        
+        // Skip self-closing tags
+        if (fullTag.endsWith('/>') || ['br', 'hr', 'img', 'input'].includes(tagName)) {
+            continue;
+        }
+        
+        if (fullTag.startsWith('</')) {
+            // Closing tag
+            if (stack.length === 0 || stack.pop() !== tagName) {
+                return false;
             }
-            const lastOpen = stack.pop();
-            if (map[lastOpen] !== char) {
-                return false; // Mismatched brackets
-            }
+        } else {
+            // Opening tag
+            stack.push(tagName);
         }
     }
-
-    return stack.length === 0; // True if stack is empty (all matched)
-}
-function parseQuizQuestions(html) { 
-  let questionsArr = [];
-  let questionCount = 0; 
-  
-  let htmlData = html.split("\n"); // split all the code 
-  let divFormat = `<div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">`;
-  
-  let openDiv = false;
-
-  for (let i=0; i<htmlData.length; i++) { 
-    if (htmlData[i] === divFormat) {
-      console.log("Q: "+i);
-      // TODO: read opening / closing div. 
-      //   needed to find each questions' content.
-      questionCount++;
-      while (!openDiv) {
-        
-      }
-      // save to buffer UNTIL <\div> 
-    }
-  }
-  if (questionCount = 0) {
-    return;
-  }
-
-
-  //questionsArr.push({
-  //  html: divData, 
-  //});
-  
-  return questionsArr;
+    
+    return stack.length === 0;
 }
 
 function parseQuizHTML(htmlContent) {
@@ -64,531 +31,510 @@ function parseQuizHTML(htmlContent) {
     let currentIndex = 0;
     
     while (currentIndex < htmlContent.length) {
-        // Skip to QUESTION holder - updated to match actual structure
+        // Find question holder div
         const questionHolderStart = htmlContent.indexOf('class="quiz_sortable question_holder "', currentIndex);
         if (questionHolderStart === -1) break;
         
-        // Skip to QUESTION TEXT - updated to match actual structure  
-        const questionTextStart = htmlContent.indexOf('class="question_text user_content enhanced">', questionHolderStart);
-        if (questionTextStart === -1) break;
+        // Find the complete question holder div by finding its closing tag
+        const questionHolderDivStart = htmlContent.lastIndexOf('<div', questionHolderStart);
+        let divBalance = 0;
+        let questionHolderEnd = questionHolderDivStart;
         
-        // Find the start of the actual question text (after the >)
-        const questionContentStart = questionTextStart + 'class="question_text user_content enhanced">'.length;
-        
-        // Read until the closing </div> tag for question text
-        const questionContentEnd = htmlContent.indexOf('</div>', questionContentStart);
-        if (questionContentEnd === -1) break;
-        
-        let questionText = htmlContent.substring(questionContentStart, questionContentEnd).trim();
-        // Clean up HTML tags like <br> in the question text
-        questionText = questionText.replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim();
-        
-        // Skip to ANSWERS wrapper - looking for the actual structure
-        const answersWrapperStart = htmlContent.indexOf('<div class="answers_wrapper">', questionContentEnd);
-        if (answersWrapperStart === -1) break;
-        
-        // Find the closing </div> for the answers_wrapper
-        let answersWrapperEnd = answersWrapperStart + '<div class="answers_wrapper">'.length;
-        let divCount = 1;
-        let searchIndex = answersWrapperEnd;
-        
-        while (divCount > 0 && searchIndex < htmlContent.length) {
-            const nextOpenDiv = htmlContent.indexOf('<div', searchIndex);
-            const nextCloseDiv = htmlContent.indexOf('</div>', searchIndex);
+        // Find the matching closing div for the question holder
+        while (questionHolderEnd < htmlContent.length) {
+            const nextDiv = htmlContent.indexOf('<div', questionHolderEnd + 1);
+            const nextCloseDiv = htmlContent.indexOf('</div>', questionHolderEnd + 1);
             
             if (nextCloseDiv === -1) break;
             
-            if (nextOpenDiv !== -1 && nextOpenDiv < nextCloseDiv) {
-                divCount++;
-                searchIndex = nextOpenDiv + 4;
+            if (nextDiv !== -1 && nextDiv < nextCloseDiv) {
+                divBalance++;
+                questionHolderEnd = nextDiv + 4;
             } else {
-                divCount--;
-                searchIndex = nextCloseDiv + 6;
-                if (divCount === 0) {
-                    answersWrapperEnd = nextCloseDiv;
+                if (divBalance === 0) {
+                    questionHolderEnd = nextCloseDiv + 6;
+                    break;
                 }
+                divBalance--;
+                questionHolderEnd = nextCloseDiv + 6;
             }
         }
         
-        // Extract all answers within the wrapper
-        const answersSection = htmlContent.substring(answersWrapperStart, answersWrapperEnd);
+        const questionSection = htmlContent.substring(questionHolderDivStart, questionHolderEnd);
+        
+        // Extract question text
+        const questionTextStart = questionSection.indexOf('class="question_text user_content enhanced">');
+        if (questionTextStart === -1) {
+            currentIndex = questionHolderEnd;
+            continue;
+        }
+        
+        const questionContentStart = questionTextStart + 'class="question_text user_content enhanced">'.length;
+        const questionContentEnd = questionSection.indexOf('</div>', questionContentStart);
+        if (questionContentEnd === -1) {
+            currentIndex = questionHolderEnd;
+            continue;
+        }
+        
+        let questionText = questionSection.substring(questionContentStart, questionContentEnd).trim();
+        questionText = questionText.replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim();
+        
+        // Extract answers
+        const answersWrapperStart = questionSection.indexOf('<div class="answers_wrapper">');
+        if (answersWrapperStart === -1) {
+            currentIndex = questionHolderEnd;
+            continue;
+        }
+        
         const answers = [];
         let correctAnswer = null;
-        let answerIndex = 0;
         
-        while (answerIndex < answersSection.length) {
-            // Look for answer containers
-            const answerDivStart = answersSection.indexOf('<div class="answer answer_for_', answerIndex);
-            if (answerDivStart === -1) break;
-            
-            // Check if this is the correct answer by looking for "correct_answer" class
-            const answerDivEnd = answersSection.indexOf('>', answerDivStart);
-            const answerDivTag = answersSection.substring(answerDivStart, answerDivEnd);
+        // Find all answer divs
+        const answerPattern = /<div class="answer answer_for_[^"]*"[^>]*>/g;
+        let answerMatch;
+        
+        while ((answerMatch = answerPattern.exec(questionSection)) !== null) {
+            const answerDivStart = answerMatch.index;
+            const answerDivTag = answerMatch[0];
             const isCorrect = answerDivTag.includes('correct_answer');
             
-            // Skip to ANSWER TEXT within this answer div
-            const answerTextStart = answersSection.indexOf('<div class="answer_text">', answerDivStart);
-            if (answerTextStart === -1) {
-                answerIndex = answerDivEnd;
-                continue;
-            }
+            // Find the answer text within this answer div
+            const answerTextStart = questionSection.indexOf('<div class="answer_text">', answerDivStart);
+            if (answerTextStart === -1) continue;
             
-            // Find the start of the actual answer text (after the >)
             const answerContentStart = answerTextStart + '<div class="answer_text">'.length;
+            const answerContentEnd = questionSection.indexOf('</div>', answerContentStart);
+            if (answerContentEnd === -1) continue;
             
-            // Read until the closing </div> tag
-            const answerContentEnd = answersSection.indexOf('</div>', answerContentStart);
-            if (answerContentEnd === -1) break;
-            
-            const answerText = answersSection.substring(answerContentStart, answerContentEnd).trim();
+            const answerText = questionSection.substring(answerContentStart, answerContentEnd).trim();
             if (answerText) {
                 answers.push(answerText);
                 if (isCorrect) {
                     correctAnswer = answerText;
                 }
             }
-            
-            answerIndex = answerContentEnd;
         }
         
-        // Add the question, answers, and correct answer to our results
-        questions.push({
-            question: questionText,
-            answers: answers,
-            correctAnswer: correctAnswer
-        });
+        // Only add question if we found valid content
+        if (questionText && answers.length > 0) {
+            questions.push({
+                question: questionText,
+                answers: answers,
+                correctAnswer: correctAnswer
+            });
+        }
         
-        // Move to search for the next question
-        currentIndex = answersWrapperEnd;
+        currentIndex = questionHolderEnd;
     }
     
     return questions;
 }
 
-// Example usage with the provided HTML:
-/*
-const parsedQuestions = parseQuizHTML(htmlContent);
-console.log(JSON.stringify(parsedQuestions, null, 2));
-
-// Expected output:
-// [
-//   {
-//     "question": "Muscular ridges on the inner surface of the ventricles are called",
-//     "answers": [
-//       "coronary sinuses.",
-//       "chordae tendineae.", 
-//       "intercalated discs.",
-//       "trabeculae carneae.",
-//       "papillary muscles."
-//     ],
-//     "correctAnswer": "trabeculae carneae."
-//   }
-// ]
-*/
-
-
-function main() {
-
-  let html = `
-<div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">
-  <div style="display: block; height: 1px; overflow: hidden;">&nbsp;</div>
-  <a name="question_103746432"></a>
-  <div class="display_question question multiple_choice_question correct bordered" id="question_103746432"><span class="answer_indicator correct" id="question_103746432_arrow">Correct answer</span>
+// Alternative simpler parsing approach (maybe not needed)
+function parseQuizQuestionsSimple(html) {
+    const questionsArr = [];
+    const htmlLines = html.split('\n');
     
-<div class="move">
-  <a tabindex="0" class="draggable-handle" role="button">
-    <i class="icon-drag-handle">
-      <span class="screenreader-only">Move To...</span>
-      <span class="accessibility-warning screenreader-only">
-        This element is a more accessible alternative to drag &amp; drop reordering. Press Enter or Space to move this question.
-      </span>
-    </i>
-  </a>
-</div>
-
-
-    <div class="header">
-      <span class="name question_name" role="heading" aria-level="2">Question 1</span>
-      <span class="question_points_holder" style="">
-        <div class="user_points">
-                0
-          <span class="points question_points"> / 0</span> pts
-        </div>
-    </span>
-    </div>
-      <div class="links" style="display: none;">
-        <a href="#" class="edit_question_link no-hover" title="Edit this Question"><i class="icon-edit standalone-icon"><span class="screenreader-only">Edit this Question</span></i></a>
-          <a href="#" class="delete_question_link no-hover" title="Delete this Question"><i class="icon-end standalone-icon"><span class="screenreader-only">Delete this Question</span></i></a>
-      </div>
-    <div style="display: none;">
-      <span class="regrade_option"></span>
-      <span class="regrade_disabled">0</span>
-      <span class="question_type">multiple_choice_question</span>
-      <span class="answer_selection_type"></span>
-        <a href="/courses/1683555/quizzes/4627579/questions/103746432" class="update_question_url">&nbsp;</a>
-      <span class="assessment_question_id">236696900</span>
-    </div>
-    <div class="text">
-      <div class="original_question_text" style="display: none;">
-        <textarea disabled="" style="display: none;" name="text_after_answers" class="textarea_text_after_answers"></textarea>
-        <textarea disabled="" style="display: none;" name="question_text" class="textarea_question_text">Muscular ridges on the inner surface of the ventricles are called &lt;br&gt;</textarea>
-      </div>
-      <div id="question_103746432_question_text" class="question_text user_content enhanced">
-          Muscular ridges on the inner surface of the ventricles are called <br>
-      </div>
-      <div class="answers">
-                <div class="answers_wrapper">
-                  
-    <div class="answer answer_for_
-         
-         
-         
-         
-          " id="answer_7955" style="" title="coronary sinuses..">
-
-
-      <span class="hidden id">7955</span>
-
-    <div class="select_answer answer_type">
-        <input id="answer-7955" name="question-103746432" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746432_arrow">&nbsp;
-      <label for="answer-7955">
-        <div class="answer_text">coronary sinuses.</div>
-        <div class="answer_html"></div>
-      </label>
-    </div>
-    <div class="answer_type short_answer" style="display:none;">
-      <input name="answer_text" type="text" style="width: 161.5px; margin-bottom: 5px; color: rgb(0, 0, 0);" disabled="true" value="coronary sinuses.">
-    </div>
-    <div class="answer_match matching_answer answer_type" style="display:none;">
-      <div class="answer_match_left">coronary sinuses.</div>
-      <div class="answer_match_left_html" style="display:none;"></div>
-      <div class="answer_match_middle">&nbsp;</div>
-      <div class="answer_match_right">
-              
-      </div>
-      <div class="clear"></div>
-    </div>
-    <div style="display: none;">
-      <span class="numerical_answer_type">exact_answer</span>
-      <span class="blank_id">none</span>
-      <span class="question_id">103746432</span>
-      <span class="id">7955</span>
-      <span class="match_id"></span>
-    </div>
-      <div class="numerical_exact_answer answer_type" style="display:none;">
-        <span class="answer_exact">0</span> (with margin: <span class="answer_error_margin">0</span>)
-      </div>
-      <div class="numerical_precision_answer answer_type" style="display:none;">
-        <span class="answer_approximate">
-          0
-        </span> (with precision: <span class="answer_precision">10</span>)
-      </div>
-      <div class="numerical_range_answer answer_type" style="display:none;">
-        Between <span class="answer_range_start">0</span> and <span class="answer_range_end">0</span>
-      </div>
-    <div class="numerical_range_answer answer_type" style="display:none;">
-      <span class="answer_equation"></span>
-      <span class="margin" style="display: none;">
-        margin of error
-        <span style="font-size: 0.8em;">
-          +/-
-        </span>
-        <span class="answer_tolerance"></span>
-      </span>
-    </div>
-      <span class="answer_weight" style="display: none;">0</span>
-
-    <div class="clear"></div>
-  </div>
-
-    <div class="clear"></div>
-
-    <div class="answer answer_for_
-         
-         
-         
-         
-          " id="answer_83277" style="" title="chordae tendineae..">
-
-
-      <span class="hidden id">83277</span>
-
-    <div class="select_answer answer_type">
-        <input id="answer-83277" name="question-103746432" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746432_arrow">&nbsp;
-      <label for="answer-83277">
-        <div class="answer_text">chordae tendineae.</div>
-        <div class="answer_html"></div>
-      </label>
-    </div>
-    <div class="answer_type short_answer" style="display:none;">
-      <input name="answer_text" type="text" style="width: 171px; margin-bottom: 5px; color: rgb(0, 0, 0);" disabled="true" value="chordae tendineae.">
-    </div>
-    <div class="answer_match matching_answer answer_type" style="display:none;">
-      <div class="answer_match_left">chordae tendineae.</div>
-      <div class="answer_match_left_html" style="display:none;"></div>
-      <div class="answer_match_middle">&nbsp;</div>
-      <div class="answer_match_right">
-              
-      </div>
-      <div class="clear"></div>
-    </div>
-    <div style="display: none;">
-      <span class="numerical_answer_type">exact_answer</span>
-      <span class="blank_id">none</span>
-      <span class="question_id">103746432</span>
-      <span class="id">83277</span>
-      <span class="match_id"></span>
-    </div>
-      <div class="numerical_exact_answer answer_type" style="display:none;">
-        <span class="answer_exact">0</span> (with margin: <span class="answer_error_margin">0</span>)
-      </div>
-      <div class="numerical_precision_answer answer_type" style="display:none;">
-        <span class="answer_approximate">
-          0
-        </span> (with precision: <span class="answer_precision">10</span>)
-      </div>
-      <div class="numerical_range_answer answer_type" style="display:none;">
-        Between <span class="answer_range_start">0</span> and <span class="answer_range_end">0</span>
-      </div>
-    <div class="numerical_range_answer answer_type" style="display:none;">
-      <span class="answer_equation"></span>
-      <span class="margin" style="display: none;">
-        margin of error
-        <span style="font-size: 0.8em;">
-          +/-
-        </span>
-        <span class="answer_tolerance"></span>
-      </span>
-    </div>
-      <span class="answer_weight" style="display: none;">0</span>
-
-    <div class="clear"></div>
-  </div>
-
-    <div class="clear"></div>
-
-    <div class="answer answer_for_
-         
-         
-         
-         
-          " id="answer_3955" style="" title="intercalated discs..">
-
-
-      <span class="hidden id">3955</span>
-
-    <div class="select_answer answer_type">
-        <input id="answer-3955" name="question-103746432" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746432_arrow">&nbsp;
-      <label for="answer-3955">
-        <div class="answer_text">intercalated discs.</div>
-        <div class="answer_html"></div>
-      </label>
-    </div>
-    <div class="answer_type short_answer" style="display:none;">
-      <input name="answer_text" type="text" style="width: 180.5px; margin-bottom: 5px; color: rgb(0, 0, 0);" disabled="true" value="intercalated discs.">
-    </div>
-    <div class="answer_match matching_answer answer_type" style="display:none;">
-      <div class="answer_match_left">intercalated discs.</div>
-      <div class="answer_match_left_html" style="display:none;"></div>
-      <div class="answer_match_middle">&nbsp;</div>
-      <div class="answer_match_right">
-              
-      </div>
-      <div class="clear"></div>
-    </div>
-    <div style="display: none;">
-      <span class="numerical_answer_type">exact_answer</span>
-      <span class="blank_id">none</span>
-      <span class="question_id">103746432</span>
-      <span class="id">3955</span>
-      <span class="match_id"></span>
-    </div>
-      <div class="numerical_exact_answer answer_type" style="display:none;">
-        <span class="answer_exact">0</span> (with margin: <span class="answer_error_margin">0</span>)
-      </div>
-      <div class="numerical_precision_answer answer_type" style="display:none;">
-        <span class="answer_approximate">
-          0
-        </span> (with precision: <span class="answer_precision">10</span>)
-      </div>
-      <div class="numerical_range_answer answer_type" style="display:none;">
-        Between <span class="answer_range_start">0</span> and <span class="answer_range_end">0</span>
-      </div>
-    <div class="numerical_range_answer answer_type" style="display:none;">
-      <span class="answer_equation"></span>
-      <span class="margin" style="display: none;">
-        margin of error
-        <span style="font-size: 0.8em;">
-          +/-
-        </span>
-        <span class="answer_tolerance"></span>
-      </span>
-    </div>
-      <span class="answer_weight" style="display: none;">0</span>
-
-    <div class="clear"></div>
-  </div>
-
-    <div class="clear"></div>
-
-    <div class="answer answer_for_
-         
-         
-         
-         
-         selected_answer correct_answer" id="answer_86722" style="" title="trabeculae carneae.. You selected this answer. This was the correct answer."><span class="answer_arrow correct" aria-label="Correct!" id="answer_86722_arrow"></span>
-
-
-      <span class="hidden id">86722</span>
-
-    <div class="select_answer answer_type">
-        <input id="answer-86722" name="question-103746432" type="radio" checked="" class="question_input" aria-disabled="true" disabled="" aria-describedby="answer_86722_arrow">&nbsp;
-      <label for="answer-86722">
-        <div class="answer_text">trabeculae carneae.</div>
-        <div class="answer_html"></div>
-      </label>
-    </div>
-    <div class="answer_type short_answer" style="display:none;">
-      <input name="answer_text" type="text" style="width: 180.5px; margin-bottom: 5px; color: rgb(0, 0, 0);" disabled="true" value="trabeculae carneae.">
-    </div>
-    <div class="answer_match matching_answer answer_type" style="display:none;">
-      <div class="answer_match_left">trabeculae carneae.</div>
-      <div class="answer_match_left_html" style="display:none;"></div>
-      <div class="answer_match_middle">&nbsp;</div>
-      <div class="answer_match_right">
-              
-      </div>
-      <div class="clear"></div>
-    </div>
-    <div style="display: none;">
-      <span class="numerical_answer_type">exact_answer</span>
-      <span class="blank_id">none</span>
-      <span class="question_id">103746432</span>
-      <span class="id">86722</span>
-      <span class="match_id"></span>
-    </div>
-      <div class="numerical_exact_answer answer_type" style="display:none;">
-        <span class="answer_exact">0</span> (with margin: <span class="answer_error_margin">0</span>)
-      </div>
-      <div class="numerical_precision_answer answer_type" style="display:none;">
-        <span class="answer_approximate">
-          0
-        </span> (with precision: <span class="answer_precision">10</span>)
-      </div>
-      <div class="numerical_range_answer answer_type" style="display:none;">
-        Between <span class="answer_range_start">0</span> and <span class="answer_range_end">0</span>
-      </div>
-    <div class="numerical_range_answer answer_type" style="display:none;">
-      <span class="answer_equation"></span>
-      <span class="margin" style="display: none;">
-        margin of error
-        <span style="font-size: 0.8em;">
-          +/-
-        </span>
-        <span class="answer_tolerance"></span>
-      </span>
-    </div>
-      <span class="answer_weight" style="display: none;">100</span>
-      <div class="quiz_comment empty">
-        <div class="answer_comment"></div>
-        <div class="answer_comment_html"></div>
-      </div>
-
-    <div class="clear"></div>
-  </div>
-
-    <div class="clear"></div>
-
-    <div class="answer answer_for_
-         
-         
-         
-         
-          " id="answer_57922" style="" title="papillary muscles..">
-
-
-      <span class="hidden id">57922</span>
-
-    <div class="select_answer answer_type">
-        <input id="answer-57922" name="question-103746432" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746432_arrow">&nbsp;
-      <label for="answer-57922">
-        <div class="answer_text">papillary muscles.</div>
-        <div class="answer_html"></div>
-      </label>
-    </div>
-    <div class="answer_type short_answer" style="display:none;">
-      <input name="answer_text" type="text" style="width: 171px; margin-bottom: 5px; color: rgb(0, 0, 0);" disabled="true" value="papillary muscles.">
-    </div>
-    <div class="answer_match matching_answer answer_type" style="display:none;">
-      <div class="answer_match_left">papillary muscles.</div>
-      <div class="answer_match_left_html" style="display:none;"></div>
-      <div class="answer_match_middle">&nbsp;</div>
-      <div class="answer_match_right">
-              
-      </div>
-      <div class="clear"></div>
-    </div>
-    <div style="display: none;">
-      <span class="numerical_answer_type">exact_answer</span>
-      <span class="blank_id">none</span>
-      <span class="question_id">103746432</span>
-      <span class="id">57922</span>
-      <span class="match_id"></span>
-    </div>
-      <div class="numerical_exact_answer answer_type" style="display:none;">
-        <span class="answer_exact">0</span> (with margin: <span class="answer_error_margin">0</span>)
-      </div>
-      <div class="numerical_precision_answer answer_type" style="display:none;">
-        <span class="answer_approximate">
-          0
-        </span> (with precision: <span class="answer_precision">10</span>)
-      </div>
-      <div class="numerical_range_answer answer_type" style="display:none;">
-        Between <span class="answer_range_start">0</span> and <span class="answer_range_end">0</span>
-      </div>
-    <div class="numerical_range_answer answer_type" style="display:none;">
-      <span class="answer_equation"></span>
-      <span class="margin" style="display: none;">
-        margin of error
-        <span style="font-size: 0.8em;">
-          +/-
-        </span>
-        <span class="answer_tolerance"></span>
-      </span>
-    </div>
-      <span class="answer_weight" style="display: none;">0</span>
-
-    <div class="clear"></div>
-  </div>
-
-    <div class="clear"></div>
-
-                </div>
-      </div>
-      <div class="after_answers">
-      </div>
-    </div>
-      
-    <div class="clear"></div>
-  </div>
-</div>
-  
-  `;
-
-  // jump to class="question"
-  // save div in array
-  //  
-  const questionDivs = parseQuizQuestions(html); 
-  console.log("Found: "+questionDivs.length+" Questions");
-
-  // needs to loop,
-  //  for each div 
-  //    save parsed question
-  const parsedQuestions = parseQuizHTML(html);
-  console.log(JSON.stringify(parsedQuestions, null, 2));
-  const val = "<<>>"
-  console.log("Testing: "+val+" : "+isDivClosed(val));
-
+    let inQuestionHolder = false;
+    let questionBuffer = '';
+    let braceCount = 0;
+    
+    for (let i = 0; i < htmlLines.length; i++) {
+        const line = htmlLines[i].trim();
+        
+        // Check for question holder start
+        if (line.includes('class="quiz_sortable question_holder "')) {
+            inQuestionHolder = true;
+            questionBuffer = '';
+            braceCount = 0;
+        }
+        
+        if (inQuestionHolder) {
+            questionBuffer += line + '\n';
+            
+            // Count div tags to track nesting
+            const openDivs = (line.match(/<div/g) || []).length;
+            const closeDivs = (line.match(/<\/div>/g) || []).length;
+            braceCount += openDivs - closeDivs;
+            
+            // If we've closed all divs, we've reached the end of this question
+            if (braceCount <= 0 && questionBuffer.length > 100) {
+                const parsed = parseQuizHTML(questionBuffer);
+                if (parsed.length > 0) {
+                    questionsArr.push(...parsed);
+                }
+                inQuestionHolder = false;
+                questionBuffer = '';
+            }
+        }
+    }
+    
+    return questionsArr;
 }
+function jsonToQuizlet(quizData) {
+  // quizlet quizletFormat 
+  // <$Question1>, <$Answer>
+  // <$Question2>, <$Answer>
+  // ...
+  let quizletFormat = "";
+  quizData.forEach(item => {
+    // json format
+    //      question: questionText,
+    //      answers: answers,
+    //      correctAnswer: correctAnswer
+    quizletFormat += `${item.question}, ${item.correctAnswer}\n`;
+  });
+  return quizletFormat; 
+}
+function main() {
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz HTML Examples</title>
+</head>
+<body>
+    <h2>Example 1:</h2>
+    <div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">
+      <div style="display: block; height: 1px; overflow: hidden;">&nbsp;</div>
+      <a name="question_103746433"></a>
+      <div class="display_question question multiple_choice_question incorrect bordered" id="question_103746433"><span class="answer_indicator incorrect" id="question_103746433_arrow">Incorrect answer</span>
+        
+    <div class="move">
+      <a tabindex="0" class="draggable-handle" role="button">
+        <i class="icon-drag-handle">
+          <span class="screenreader-only">Move To...</span>
+          <span class="accessibility-warning screenreader-only">
+            This element is a more accessible alternative to drag &amp; drop reordering. Press Enter or Space to move this question.
+          </span>
+        </i>
+      </a>
+    </div>
+
+        <div class="header">
+          <span class="name question_name" role="heading" aria-level="2">Question 2</span>
+          <span class="question_points_holder" style="">
+            <div class="user_points">
+                    0
+              <span class="points question_points"> / 1</span> pts
+            </div>
+        </span>
+        </div>
+          <div class="links" style="display: none;">
+            <a href="#" class="edit_question_link no-hover" title="Edit this Question"><i class="icon-edit standalone-icon"><span class="screenreader-only">Edit this Question</span></i></a>
+              <a href="#" class="delete_question_link no-hover" title="Delete this Question"><i class="icon-end standalone-icon"><span class="screenreader-only">Delete this Question</span></i></a>
+          </div>
+        <div style="display: none;">
+          <span class="regrade_option"></span>
+          <span class="regrade_disabled">0</span>
+          <span class="question_type">multiple_choice_question</span>
+          <span class="answer_selection_type"></span>
+            <a href="/courses/1683555/quizzes/4627579/questions/103746433" class="update_question_url">&nbsp;</a>
+          <span class="assessment_question_id">236696901</span>
+        </div>
+        <div class="text">
+          <div class="original_question_text" style="display: none;">
+            <textarea disabled="" style="display: none;" name="text_after_answers" class="textarea_text_after_answers"></textarea>
+            <textarea disabled="" style="display: none;" name="question_text" class="textarea_question_text">The largest artery in the human body is the &lt;br&gt;</textarea>
+          </div>
+          <div id="question_103746433_question_text" class="question_text user_content enhanced">
+              The largest artery in the human body is the <br>
+          </div>
+          <div class="answers">
+                    <div class="answers_wrapper">
+                      
+        <div class="answer answer_for_
+             
+             
+             
+             
+             selected_answer" id="answer_7956" style="" title="pulmonary artery.. You selected this answer."><span class="answer_arrow incorrect" aria-label="Incorrect!" id="answer_7956_arrow"></span>
+
+          <span class="hidden id">7956</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-7956" name="question-103746433" type="radio" checked="" class="question_input" aria-disabled="true" disabled="" aria-describedby="answer_7956_arrow">&nbsp;
+          <label for="answer-7956">
+            <div class="answer_text">pulmonary artery.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+             correct_answer" id="answer_83278" style="" title="aorta.. This was the correct answer."><span class="answer_arrow correct" aria-label="Correct!" id="answer_83278_arrow"></span>
+
+          <span class="hidden id">83278</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-83278" name="question-103746433" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="answer_83278_arrow">&nbsp;
+          <label for="answer-83278">
+            <div class="answer_text">aorta.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_3956" style="" title="carotid artery..">
+
+          <span class="hidden id">3956</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-3956" name="question-103746433" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746433_arrow">&nbsp;
+          <label for="answer-3956">
+            <div class="answer_text">carotid artery.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_86723" style="" title="femoral artery..">
+
+          <span class="hidden id">86723</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-86723" name="question-103746433" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746433_arrow">&nbsp;
+          <label for="answer-86723">
+            <div class="answer_text">femoral artery.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_57923" style="" title="subclavian artery..">
+
+          <span class="hidden id">57923</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-57923" name="question-103746433" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746433_arrow">&nbsp;
+          <label for="answer-57923">
+            <div class="answer_text">subclavian artery.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+                    </div>
+          </div>
+          <div class="after_answers">
+          </div>
+        </div>
+          
+        <div class="clear"></div>
+      </div>
+    </div>
+
+    <hr style="margin: 40px 0;">
+
+    <h2>Example 2:</h2>
+    <div role="region" aria-label="Question" class="quiz_sortable question_holder " id="" style="" data-group-id="">
+      <div style="display: block; height: 1px; overflow: hidden;">&nbsp;</div>
+      <a name="question_103746434"></a>
+      <div class="display_question question multiple_choice_question correct bordered" id="question_103746434"><span class="answer_indicator correct" id="question_103746434_arrow">Correct answer</span>
+        
+    <div class="move">
+      <a tabindex="0" class="draggable-handle" role="button">
+        <i class="icon-drag-handle">
+          <span class="screenreader-only">Move To...</span>
+          <span class="accessibility-warning screenreader-only">
+            This element is a more accessible alternative to drag &amp; drop reordering. Press Enter or Space to move this question.
+          </span>
+        </i>
+      </a>
+    </div>
+
+        <div class="header">
+          <span class="name question_name" role="heading" aria-level="2">Question 3</span>
+          <span class="question_points_holder" style="">
+            <div class="user_points">
+                    1
+              <span class="points question_points"> / 1</span> pts
+            </div>
+        </span>
+        </div>
+          <div class="links" style="display: none;">
+            <a href="#" class="edit_question_link no-hover" title="Edit this Question"><i class="icon-edit standalone-icon"><span class="screenreader-only">Edit this Question</span></i></a>
+              <a href="#" class="delete_question_link no-hover" title="Delete this Question"><i class="icon-end standalone-icon"><span class="screenreader-only">Delete this Question</span></i></a>
+          </div>
+        <div style="display: none;">
+          <span class="regrade_option"></span>
+          <span class="regrade_disabled">0</span>
+          <span class="question_type">multiple_choice_question</span>
+          <span class="answer_selection_type"></span>
+            <a href="/courses/1683555/quizzes/4627579/questions/103746434" class="update_question_url">&nbsp;</a>
+          <span class="assessment_question_id">236696902</span>
+        </div>
+        <div class="text">
+          <div class="original_question_text" style="display: none;">
+            <textarea disabled="" style="display: none;" name="text_after_answers" class="textarea_text_after_answers"></textarea>
+            <textarea disabled="" style="display: none;" name="question_text" class="textarea_question_text">The smallest functional unit of the kidney is the &lt;br&gt;</textarea>
+          </div>
+          <div id="question_103746434_question_text" class="question_text user_content enhanced">
+              The smallest functional unit of the kidney is the <br>
+          </div>
+          <div class="answers">
+                    <div class="answers_wrapper">
+                      
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_7957" style="" title="glomerulus..">
+
+          <span class="hidden id">7957</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-7957" name="question-103746434" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746434_arrow">&nbsp;
+          <label for="answer-7957">
+            <div class="answer_text">glomerulus.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+             selected_answer correct_answer" id="answer_83279" style="" title="nephron.. You selected this answer. This was the correct answer."><span class="answer_arrow correct" aria-label="Correct!" id="answer_83279_arrow"></span>
+
+          <span class="hidden id">83279</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-83279" name="question-103746434" type="radio" checked="" class="question_input" aria-disabled="true" disabled="" aria-describedby="answer_83279_arrow">&nbsp;
+          <label for="answer-83279">
+            <div class="answer_text">nephron.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_3957" style="" title="collecting duct..">
+
+          <span class="hidden id">3957</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-3957" name="question-103746434" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746434_arrow">&nbsp;
+          <label for="answer-3957">
+            <div class="answer_text">collecting duct.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_86724" style="" title="loop of Henle..">
+
+          <span class="hidden id">86724</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-86724" name="question-103746434" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746434_arrow">&nbsp;
+          <label for="answer-86724">
+            <div class="answer_text">loop of Henle.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+        <div class="answer answer_for_
+             
+             
+             
+             
+              " id="answer_57924" style="" title="renal corpuscle..">
+
+          <span class="hidden id">57924</span>
+
+        <div class="select_answer answer_type">
+            <input id="answer-57924" name="question-103746434" type="radio" class="question_input" aria-disabled="true" disabled="" aria-describedby="question_103746434_arrow">&nbsp;
+          <label for="answer-57924">
+            <div class="answer_text">renal corpuscle.</div>
+            <div class="answer_html"></div>
+          </label>
+        </div>
+        </div>
+
+                    </div>
+          </div>
+          <div class="after_answers">
+          </div>
+        </div>
+          
+        <div class="clear"></div>
+      </div>
+    </div>
+</body>
+</html>
+`;
+
+    console.log("=== Testing HTML Balance ===");
+    const testCases = ["<>", "<<>>", "<div></div>", "<div><span></span></div>"];
+    testCases.forEach(test => {
+        console.log(`Testing: "${test}" : ${isHtmlBalanced(test)}`);
+    });
+
+    console.log("\n=== Parsing Quiz Questions ===");
+    
+    // Method 1: Direct parsing
+    const parsedQuestions = parseQuizHTML(html);
+    console.log("Direct parsing found:", parsedQuestions.length, "questions");
+    console.log(JSON.stringify(parsedQuestions, null, 2));
+    
+    
+    
+    // json format
+    //      question: questionText,
+    //      answers: answers,
+    //      correctAnswer: correctAnswer
+
+    console.log("\n=== Alternative Simple Parsing ===");
+    
+    // Method 2: Line-by-line parsing
+    const simpleQuestions = parseQuizQuestionsSimple(html);
+    console.log("Simple parsing found:", simpleQuestions.length, "questions");
+    
+    if (parsedQuestions.length > 0) {
+        console.log("\n=== Success! ===");
+        console.log("Question:", parsedQuestions[0].question);
+        console.log("Number of answers:", parsedQuestions[0].answers.length);
+        console.log("Correct answer:", parsedQuestions[0].correctAnswer);
+    }
+    console.log("\n=== Quizlet Import Data ===");
+    const quizletQuestions = jsonToQuizlet(parsedQuestions);
+    console.log(quizletQuestions);
+}
+
 main();
 export default main;
